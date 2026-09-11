@@ -47,3 +47,9 @@ include = ["bayesgbm*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+
+[tool.ruff]
+line-length = 160
+
+[tool.ruff.format]
+skip-magic-trailing-comma = true

@@ -1,11 +1,13 @@
 """Individual MAP/Laplace fitting for BayesGBM StateModel objects."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Optional
 import copy
 import warnings
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
 import numpy as np
 
 from .optimization import Config, OptimizationDiagnostics, OptimizationResult, optimize_map
@@ -40,7 +42,7 @@ class FitMath:
     log_prior: np.ndarray
     log_joint: np.ndarray
     hessian: list[np.ndarray]
-    covariance: list[Optional[np.ndarray]]
+    covariance: list[np.ndarray | None]
     diagnostics: list[OptimizationDiagnostics]
     free_mask: list[np.ndarray]
 
@@ -63,17 +65,19 @@ class FitResult:
 
     def plot(self, subject: int = 0, **kwargs):
         from .display import plot_subject
+
         return plot_subject(self, subject=subject, **kwargs)
 
     def summary(self, subject: int = 0) -> str:
         from .reporting import fit_summary
+
         return fit_summary(self, subject=subject)
 
     def __repr__(self):
         return self.summary(0)
 
 
-def _full_covariance(opt: OptimizationResult, n_params: int) -> Optional[np.ndarray]:
+def _full_covariance(opt: OptimizationResult, n_params: int) -> np.ndarray | None:
     if opt.covariance is None:
         return None
     full = np.zeros((n_params, n_params), dtype=float)
@@ -83,8 +87,8 @@ def _full_covariance(opt: OptimizationResult, n_params: int) -> Optional[np.ndar
 
 
 def _latent_none(run, model):
+    # Provide the latent trajectory at the MAP despite invalid Laplace
     mean = np.asarray(run["states"], dtype=float)
-    T, n = mean.shape
     return {
         "state": {
             "mean": mean,
@@ -125,8 +129,8 @@ def _sample_static_posterior(opt: OptimizationResult, model, n_samples: int, rng
     if not opt.diagnostics.laplace_valid or opt.covariance is None:
         raise ValueError("propagated latent uncertainty requires a valid Laplace posterior")
     free_draws = rng.multivariate_normal(opt.free_parameters, opt.covariance, size=n_samples)
-    mean = model.priors.mean
-    draws = np.tile(mean, (n_samples, 1))
+    prior_mean = model.priors.mean
+    draws = np.tile(prior_mean, (n_samples, 1))
     draws[:, opt.free_mask] = free_draws
     return draws
 
@@ -134,18 +138,13 @@ def _sample_static_posterior(opt: OptimizationResult, model, n_samples: int, rng
 def _latent_propagated(opt, model, subject_data, config, rng):
     if not opt.diagnostics.laplace_valid:
         warnings.warn(
-            "Laplace posterior is invalid; propagated latent uncertainty is unavailable. "
-            "The MAP latent trajectory is retained without a shadow.",
+            "Laplace posterior is invalid; propagated latent uncertainty is unavailable. The MAP latent trajectory is retained without a shadow.",
             RuntimeWarning,
             stacklevel=3,
         )
         return _latent_none(model.evaluate(opt.parameters, subject_data), model)
     if opt.diagnostics.laplace_fragile:
-        warnings.warn(
-            "Laplace posterior is numerically fragile; propagated latent uncertainty may be sensitive.",
-            RuntimeWarning,
-            stacklevel=3,
-        )
+        warnings.warn("Laplace posterior is numerically fragile; propagated latent uncertainty may be sensitive.", RuntimeWarning, stacklevel=3)
     draws = _sample_static_posterior(opt, model, config.latent_samples, rng)
     trajectories = []
     for p in draws:
@@ -175,7 +174,7 @@ def _latent_propagated(opt, model, subject_data, config, rng):
     }
 
 
-def individual_fit(data, model, *, config: Optional[Config] = None) -> FitResult:
+def individual_fit(data, model, *, config: Config | None = None) -> FitResult:
     """Fit every subject under one :class:`~bayesgbm.StateModel`.
 
     The scientific likelihood is determined by the model. If latent-state
@@ -206,10 +205,7 @@ def individual_fit(data, model, *, config: Optional[Config] = None) -> FitResult
         if config.verbose:
             status = "valid" if opt.diagnostics.laplace_valid else "INVALID"
             frag = " (fragile)" if opt.diagnostics.laplace_fragile else ""
-            print(
-                f"Subject {n + 1:02d}: log joint={opt.log_joint:.3f}, "
-                f"Laplace={status}{frag}"
-            )
+            print(f"Subject {n + 1:02d}: log joint={opt.log_joint:.3f}, Laplace={status}{frag}")
 
     parameters = np.vstack([o.parameters for o in opts])
     ntheta = model.n_theta

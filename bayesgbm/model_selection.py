@@ -56,7 +56,7 @@ def _null_fe(L):
 
 
 def bms(lme, *, alpha0: Optional[np.ndarray] = None, n_samples=100000, random_state=42, tol=1e-6, maxiter=10000):
-    """Stephan/Rigoux random-effects Bayesian model selection.
+    """Random-effects Bayesian model selection.
 
     Parameters
     ----------

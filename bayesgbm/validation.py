@@ -1,7 +1,9 @@
 """Central preflight validation for BayesGBM model specifications."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 import numpy as np
 
 from .state_model import trial_input
@@ -32,9 +34,7 @@ def _validate_u(u, T: int, subject: int):
         for key, value in u.items():
             arr = np.asarray(value)
             if arr.ndim > 0 and arr.shape[0] != T:
-                raise ValueError(
-                    f"subject {subject}: input field {key!r} has length {arr.shape[0]}, expected {T}"
-                )
+                raise ValueError(f"subject {subject}: input field {key!r} has length {arr.shape[0]}, expected {T}")
             _check_numeric_finite(value, f"subject {subject} input {key!r}")
         return
     arr = np.asarray(u)
@@ -142,14 +142,9 @@ def validate_fit_spec(data, model, config) -> ValidatedSpec:
 
     if config.latent_uncertainty == "filtered" and not model.has_state_uncertainty():
         raise ValueError(
-            "latent_uncertainty='filtered' requires initial-state uncertainty or process_covariance; "
-            "use 'propagated' or 'none' for a deterministic state model"
+            "latent_uncertainty='filtered' requires initial-state uncertainty or process_covariance; use 'propagated' or 'none' for a deterministic state model"
         )
 
     return ValidatedSpec(
-        n_subjects=len(data),
-        n_parameters=model.n_parameters,
-        n_state=model.n_state,
-        parameter_names=parameter_names,
-        state_names=tuple(model.state_names),
+        n_subjects=len(data), n_parameters=model.n_parameters, n_state=model.n_state, parameter_names=parameter_names, state_names=tuple(model.state_names)
     )
