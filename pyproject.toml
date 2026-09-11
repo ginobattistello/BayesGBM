@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bayesgbm"
+version = "0.1.0"
+description = "Bayesian Generative Brain/Behavior Modelling in Python"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "BayesGBM contributors"}]
+keywords = ["computational modeling", "bayesian", "behavior", "state-space", "laplace", "model selection"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+    "numpy>=1.23",
+    "scipy>=1.9",
+]
+
+[project.optional-dependencies]
+display = ["matplotlib>=3.6"]
+dev = [
+    "pytest>=7",
+    "matplotlib>=3.6",
+    "build>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/ginobattistello/BayesGBM"
+Repository = "https://github.com/ginobattistello/BayesGBM"
+Issues = "https://github.com/ginobattistello/BayesGBM/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bayesgbm*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
