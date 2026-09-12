@@ -1,8 +1,10 @@
 """Gaussian prior containers used by BayesGBM."""
+
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional, Sequence
+
 import numpy as np
 
 
@@ -55,7 +57,7 @@ class GaussianPrior:
 
     mean: Sequence[float]
     covariance: object
-    names: Optional[Sequence[str]] = None
+    names: Sequence[str] | None = None
 
     def __post_init__(self):
         mean = _as_mean(self.mean)
@@ -66,9 +68,7 @@ class GaussianPrior:
                 row = raw[j].copy()
                 row[j] = 0.0
                 if not np.allclose(row, 0.0, atol=1e-12, rtol=0.0):
-                    raise ValueError(
-                        "a zero-variance fixed parameter must have zero cross-covariance"
-                    )
+                    raise ValueError("a zero-variance fixed parameter must have zero cross-covariance")
         cov = covariance_matrix(self.covariance, len(mean), name="prior covariance")
         diag = np.diag(cov)
         fixed = np.isclose(diag, 0.0, atol=1e-14, rtol=0.0)
@@ -76,9 +76,7 @@ class GaussianPrior:
             row = cov[j].copy()
             row[j] = 0.0
             if not np.allclose(row, 0.0, atol=1e-12, rtol=0.0):
-                raise ValueError(
-                    "a zero-variance fixed parameter must have zero cross-covariance"
-                )
+                raise ValueError("a zero-variance fixed parameter must have zero cross-covariance")
         if self.names is None:
             names = None
         else:
@@ -122,6 +120,7 @@ class Priors:
         out = np.zeros((self.dim, self.dim), dtype=float)
         out[: a.shape[0], : a.shape[1]] = a
         out[a.shape[0] :, a.shape[1] :] = b
+        # NOTE: block diag matrix assume prior independence between evolution and observation quantities
         return out
 
     @property

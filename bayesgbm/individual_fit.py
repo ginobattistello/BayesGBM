@@ -87,7 +87,7 @@ def _full_covariance(opt: OptimizationResult, n_params: int) -> np.ndarray | Non
 
 
 def _latent_none(run, model):
-    # Provide the latent trajectory at the MAP despite invalid Laplace
+    # Provide the latent trajectory only at the MAP despite invalid Laplace
     mean = np.asarray(run["states"], dtype=float)
     return {
         "state": {

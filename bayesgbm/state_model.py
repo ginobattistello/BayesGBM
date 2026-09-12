@@ -1,12 +1,14 @@
 """Generative state-model definition and deterministic likelihood helpers."""
+
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Sequence
+from typing import Any
+
 import numpy as np
 
 from .priors import Priors, covariance_matrix
-
 
 Family = str
 
@@ -23,9 +25,7 @@ def trial_input(u: Any, t: int, T: int):
                 out[key] = value
             else:
                 if arr.shape[0] != T:
-                    raise ValueError(
-                        f"input field {key!r} has first dimension {arr.shape[0]}, expected {T}"
-                    )
+                    raise ValueError(f"input field {key!r} has first dimension {arr.shape[0]}, expected {T}")
                 out[key] = value[t]
         return out
     arr = np.asarray(u)
@@ -83,16 +83,14 @@ class StateModel:
     family: Family
     priors: Priors
     initial_state: Sequence[float]
-    initial_state_covariance: Optional[object] = None
-    process_covariance: Optional[object] = None
-    observation_covariance: Optional[object] = None
-    state_names: Optional[Sequence[str]] = None
-    name: Optional[str] = None
+    initial_state_covariance: object | None = None
+    process_covariance: object | None = None
+    observation_covariance: object | None = None
+    state_names: Sequence[str] | None = None
+    name: str | None = None
 
     def __post_init__(self):
         family = str(self.family).lower()
-        if family == "binomial":
-            family = "bernoulli"
         if family not in {"gaussian", "bernoulli", "categorical"}:
             raise ValueError("family must be 'gaussian', 'bernoulli', or 'categorical'")
         x0 = np.asarray(self.initial_state, dtype=float).reshape(-1)
@@ -138,22 +136,20 @@ class StateModel:
         return p[self.priors.theta_slice], p[self.priors.phi_slice]
 
     def initial_covariance_matrix(self) -> np.ndarray:
+        # P_0: Uncertainty regarding initial state
         if self.initial_state_covariance is None:
             return np.zeros((self.n_state, self.n_state), dtype=float)
-        return covariance_matrix(
-            self.initial_state_covariance,
-            self.n_state,
-            name="initial_state_covariance",
-            allow_semidefinite=True,
-        )
+        return covariance_matrix(self.initial_state_covariance, self.n_state, name="initial_state_covariance", allow_semidefinite=True)
 
     def process_covariance_matrix(self, theta, u_t) -> np.ndarray:
+        # Q_t: Uncertainty regarding state-transition (set to null produce a deterministic latent)
         value = self.process_covariance(theta, u_t) if callable(self.process_covariance) else self.process_covariance
         if value is None:
             return np.zeros((self.n_state, self.n_state), dtype=float)
         return covariance_matrix(value, self.n_state, name="process_covariance", allow_semidefinite=True)
 
     def observation_covariance_matrix(self, phi, u_t, dim: int) -> np.ndarray:
+        # R_t: Uncertainty regarding measurement/observation
         value = self.observation_covariance(phi, u_t) if callable(self.observation_covariance) else self.observation_covariance
         return covariance_matrix(value, dim, name="observation_covariance", allow_semidefinite=False)
 
@@ -213,6 +209,7 @@ class StateModel:
         """Evaluate the generative likelihood using recursion or filtering."""
         if self.has_state_uncertainty():
             from .filtering import nonlinear_state_filter
+
             return nonlinear_state_filter(self, parameters, subject_data)
         return self.deterministic_run(parameters, subject_data)
 
