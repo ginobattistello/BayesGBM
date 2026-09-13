@@ -14,6 +14,12 @@ from scipy.optimize import minimize
 jax.config.update("jax_enable_x64", True)
 _COMPILED_OBJECTIVE_CACHE = {}
 
+from pathlib import Path
+
+_JAX_CACHE = Path.home() / ".cache" / "bayesgbm" / "jax"
+jax.config.update("jax_compilation_cache_dir", str(_JAX_CACHE))
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.5)
+
 
 @dataclass(frozen=True)
 class Config:

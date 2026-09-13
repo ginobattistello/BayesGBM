@@ -8,7 +8,7 @@ from bayesgbm import Config, individual_fit
 from bayesgbm.examples.tutorial_models import binary_learning_model, simulate_binary_subject
 
 rng = np.random.default_rng(42)
-n_subjects = 5
+n_subjects = 20
 true_alpha = rng.uniform(0.10, 0.60, size=n_subjects)
 true_beta = rng.uniform(1.0, 5.0, size=n_subjects)
 data = [simulate_binary_subject(rng, n_trials=150, alpha=a, beta=b) for a, b in zip(true_alpha, true_beta)]

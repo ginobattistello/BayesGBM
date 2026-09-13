@@ -10,8 +10,39 @@ from typing import Any
 
 import numpy as np
 
-from .validation import validate_fit_spec
 from .optimization import Config, OptimizationDiagnostics, OptimizationResult, optimize_map
+from .validation import validate_fit_spec
+
+import jax
+import jax.numpy as jnp
+
+from .state_model import prepare_subject_data
+
+_PROPAGATION_CACHE = {}
+
+
+def _compiled_propagation(model, config):
+    key = (id(model), int(config.filter_max_iter), float(config.filter_tol), float(config.filter_damping), float(config.filter_jitter))
+
+    cached = _PROPAGATION_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    def one_draw(parameters, prepared_data):
+        run = model.evaluate_jax(
+            parameters,
+            prepared_data,
+            filter_max_iter=config.filter_max_iter,
+            filter_tol=config.filter_tol,
+            filter_damping=config.filter_damping,
+            filter_jitter=config.filter_jitter,
+        )
+        return run["states"]
+
+    batched = jax.jit(jax.vmap(one_draw, in_axes=(0, None)))
+
+    _PROPAGATION_CACHE[key] = batched
+    return batched
 
 
 @dataclass
@@ -150,11 +181,9 @@ def _latent_propagated(opt, model, subject_data, config, rng):
     if opt.diagnostics.laplace_fragile:
         warnings.warn("Laplace posterior is numerically fragile; propagated latent uncertainty may be sensitive.", RuntimeWarning, stacklevel=3)
     draws = _sample_static_posterior(opt, model, config.latent_samples, rng)
-    trajectories = []
-    for p in draws:
-        run = model.evaluate(p, subject_data, config=config)
-        trajectories.append(np.asarray(run["states"], dtype=float))
-    samples = np.stack(trajectories, axis=0)  # S x T x n_state
+    prepared = prepare_subject_data(subject_data)
+    propagate = _compiled_propagation(model, config)
+    samples = np.asarray(propagate(jnp.asarray(draws, dtype=jnp.float64), prepared), dtype=float)
     mean = np.mean(samples, axis=0)
     centered = samples - mean[None, :, :]
     cov = np.einsum("sti,stj->tij", centered, centered) / (samples.shape[0] - 1)
