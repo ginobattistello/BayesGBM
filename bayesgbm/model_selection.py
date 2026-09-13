@@ -1,10 +1,11 @@
 """Random-effects Bayesian model selection for group studies."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+
 import numpy as np
-from scipy.special import psi, gammaln, expit
+from scipy.special import expit, gammaln, psi
 
 
 @dataclass
@@ -50,12 +51,13 @@ def _null_fe(L):
     F0 = 0.0
     for i in range(N):
         z = L[:, i] - np.max(L[:, i])
-        g = np.exp(z); g /= np.sum(g)
+        g = np.exp(z)
+        g /= np.sum(g)
         F0 += np.sum(g * (L[:, i] - np.log(K) - np.log(np.clip(g, np.finfo(float).tiny, 1.0))))
     return float(F0)
 
 
-def bms(lme, *, alpha0: Optional[np.ndarray] = None, n_samples=100000, random_state=42, tol=1e-6, maxiter=10000):
+def bms(lme, *, alpha0: np.ndarray | None = None, n_samples=100000, random_state=42, tol=1e-6, maxiter=10000):
     """Random-effects Bayesian model selection.
 
     Parameters
@@ -76,7 +78,8 @@ def bms(lme, *, alpha0: Optional[np.ndarray] = None, n_samples=100000, random_st
     for _ in range(maxiter):
         log_r = lme + (psi(alpha) - psi(np.sum(alpha)))[None, :]
         log_r -= np.max(log_r, axis=1, keepdims=True)
-        r = np.exp(log_r); r /= np.sum(r, axis=1, keepdims=True)
+        r = np.exp(log_r)
+        r /= np.sum(r, axis=1, keepdims=True)
         new_alpha = alpha0 + np.sum(r, axis=0)
         if np.linalg.norm(new_alpha - alpha) <= tol:
             alpha = new_alpha

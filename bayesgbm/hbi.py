@@ -1,19 +1,9 @@
-"""Hierarchical group refitting for BayesGBM.
+"""Hierarchical empirical-Bayes/Laplace group refitting for BayesGBM."""
 
-This module provides a compact hierarchical empirical-Bayes approximation
-inspired by the CBM/HBI framework of Piray et al. (2019). It repeatedly
-refits subjects under model-specific Gaussian group priors, updates those
-priors by responsibility-weighted posterior moment matching, and updates
-model frequencies with a Dirichlet variational step.
-
-The individual subject approximation in every refit is BayesGBM's independent
-MAP/observed-Hessian Laplace approximation. The implementation is intentionally
-small and transparent; it is not presented as an exact line-by-line port of
-the original MATLAB/Python HBI equations.
-"""
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+
 import numpy as np
 from scipy.special import psi
 
@@ -94,7 +84,12 @@ def _weighted_block_prior(fit, weights, slc, original_prior: GaussianPrior):
 
 
 def hbi_main(data, models, *, fit_config: Config | None = None, hbi_config: HBIConfig | None = None):
-    """Hierarchically refit one or more StateModels across subjects."""
+    """Hierarchically refit theta/phi group priors across subjects.
+
+    Estimated process/observation-noise priors remain fixed at their model-level
+    specification in this first implementation.  Noise parameters are still
+    fitted per subject and included in each subject's Hessian/evidence.
+    """
     if not isinstance(models, (list, tuple)) or len(models) == 0:
         raise ValueError("models must be a non-empty sequence of StateModel objects")
     if fit_config is None:
@@ -115,10 +110,9 @@ def hbi_main(data, models, *, fit_config: Config | None = None, hbi_config: HBIC
     for it in range(1, hbi_config.maxiter + 1):
         fits = []
         lme = np.zeros((len(data), len(models)))
-        current_models = []
         for k, (model, priors) in enumerate(zip(models, group_priors)):
+            # replace() changes only theta/phi priors; Q/R modes and noise priors stay untouched.
             mk = replace(model, priors=priors)
-            current_models.append(mk)
             fit = individual_fit(data, mk, config=fit_config)
             for n, diag in enumerate(fit.math.diagnostics):
                 if not diag.laplace_valid:
@@ -132,41 +126,28 @@ def hbi_main(data, models, *, fit_config: Config | None = None, hbi_config: HBIC
 
         new_priors = []
         for k, (fit, original_model) in enumerate(zip(fits, models)):
-            pe = _weighted_block_prior(fit, r[:, k], original_model.priors.theta_slice, original_model.priors.evolution)
-            po = _weighted_block_prior(fit, r[:, k], original_model.priors.phi_slice, original_model.priors.observation)
+            layout = fit.model.parameter_layout
+            pe = _weighted_block_prior(fit, r[:, k], layout.theta_slice, original_model.priors.evolution)
+            po = _weighted_block_prior(fit, r[:, k], layout.phi_slice, original_model.priors.observation)
             new_priors.append(Priors(pe, po))
 
-        mean_change = max(float(np.linalg.norm(p.mean - old)) for p, old in zip(new_priors, prev_means))
-        freq_change = float(np.linalg.norm(freq - prev_freq))
+        delta_freq = float(np.max(np.abs(freq - prev_freq)))
+        delta_mean = max(float(np.max(np.abs(p.mean - pm))) for p, pm in zip(new_priors, prev_means))
         if hbi_config.verbose:
-            print(f"HBI iter {it:02d}: parameter change={mean_change:.3g}, frequency change={freq_change:.3g}")
+            print(f"HBI iter {it:02d}: max Δfreq={delta_freq:.3g}, max Δgroup-mean={delta_mean:.3g}")
         group_priors = new_priors
-        if max(mean_change, freq_change) < hbi_config.tol:
+        if max(delta_freq, delta_mean) <= hbi_config.tol:
             converged = True
             break
-        prev_means = [p.mean.copy() for p in group_priors]
         prev_freq = freq.copy()
-
-    # Final refit under final group priors so returned fits match returned priors.
-    final_fits = []
-    lme = np.zeros((len(data), len(models)))
-    final_models = []
-    for k, (model, priors) in enumerate(zip(models, group_priors)):
-        mk = replace(model, priors=priors)
-        final_models.append(mk)
-        fit = individual_fit(data, mk, config=fit_config)
-        final_fits.append(fit)
-        lme[:, k] = fit.output.log_evidence
-    r = _responsibilities(lme, alpha)
-    alpha = 1.0 + np.sum(r, axis=0)
-    freq = alpha / alpha.sum()
+        prev_means = [p.mean.copy() for p in group_priors]
 
     return HBIResult(
-        models=final_models,
-        fits=final_fits,
+        models=list(models),
+        fits=fits or [],
         responsibilities=r,
         dirichlet_parameters=alpha,
-        model_frequency=freq,
+        model_frequency=alpha / np.sum(alpha),
         group_priors=group_priors,
         converged=converged,
         n_iter=it,

@@ -1,7 +1,9 @@
 """Prior-sensitivity refitting utilities."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+
 import numpy as np
 
 from .individual_fit import individual_fit
@@ -16,13 +18,13 @@ class PriorSensitivityResult:
 
 
 def prior_sensitivity(data, model, priors_list, *, config):
-    """Refit one model under explicit plausible prior specifications."""
+    """Refit theta/phi priors while preserving model-level Q/R noise priors."""
     pmeans, pcovs, postmeans, postvars = [], [], [], []
     for priors in priors_list:
         m = replace(model, priors=priors)
         fit = individual_fit(data, m, config=config)
-        pmeans.append(priors.mean.copy())
-        pcovs.append(priors.covariance.copy())
+        pmeans.append(m.parameter_layout.mean.copy())
+        pcovs.append(m.parameter_layout.covariance.copy())
         postmeans.append(fit.output.parameters.copy())
         vv = []
         for cov in fit.math.covariance:

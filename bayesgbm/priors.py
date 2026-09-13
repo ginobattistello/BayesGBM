@@ -98,6 +98,27 @@ class GaussianPrior:
         return np.isclose(np.diag(self.covariance), 0.0, atol=1e-14, rtol=0.0)
 
 
+def broadcast_prior(prior: GaussianPrior, dim: int, *, prefix: str) -> GaussianPrior:
+    """Broadcast a one-dimensional prior independently over ``dim`` entries."""
+    if dim < 1:
+        raise ValueError("broadcast dimension must be >= 1")
+    if prior.dim == dim:
+        if prior.names is None:
+            return GaussianPrior(prior.mean, prior.covariance, names=[f"{prefix}[{i}]" for i in range(dim)])
+        return prior
+    if prior.dim != 1:
+        raise ValueError(f"{prefix} prior must have dimension 1 or {dim}")
+    mean = np.repeat(prior.mean[0], dim)
+    variance = float(prior.covariance[0, 0])
+    cov = np.eye(dim) * variance
+    if prior.names is None:
+        names = [f"{prefix}[{i}]" for i in range(dim)]
+    else:
+        base = prior.names[0]
+        names = [f"{base}[{i}]" for i in range(dim)]
+    return GaussianPrior(mean, cov, names=names)
+
+
 @dataclass(frozen=True)
 class Priors:
     """Separate priors for static evolution and observation parameters."""

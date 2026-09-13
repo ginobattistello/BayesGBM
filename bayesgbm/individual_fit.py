@@ -10,8 +10,8 @@ from typing import Any
 
 import numpy as np
 
-from .optimization import Config, OptimizationDiagnostics, OptimizationResult, optimize_map
 from .validation import validate_fit_spec
+from .optimization import Config, OptimizationDiagnostics, OptimizationResult, optimize_map
 
 
 @dataclass
@@ -22,6 +22,8 @@ class FitInput:
     state_names: tuple[str, ...]
     theta_slice: slice
     phi_slice: slice
+    process_noise_slice: slice
+    observation_noise_slice: slice
     prior_mean: np.ndarray
     prior_covariance: np.ndarray
 
@@ -31,6 +33,10 @@ class FitOutput:
     parameters: np.ndarray
     evolution_parameters: np.ndarray
     observation_parameters: np.ndarray
+    process_noise_parameters: np.ndarray
+    observation_noise_parameters: np.ndarray
+    process_noise_sd: np.ndarray
+    observation_noise_sd: np.ndarray
     log_evidence: np.ndarray
     latent: list[dict]
     prediction: list[np.ndarray]
@@ -87,7 +93,6 @@ def _full_covariance(opt: OptimizationResult, n_params: int) -> np.ndarray | Non
 
 
 def _latent_none(run, model):
-    # Provide the latent trajectory only at the MAP despite invalid Laplace
     mean = np.asarray(run["states"], dtype=float)
     return {
         "state": {
@@ -119,7 +124,7 @@ def _latent_filtered(run, model):
             "interval_mass": None,
             "interval_method": None,
             "uncertainty_type": "filtered",
-            "method": run.get("filtering_method", "unknown_filter"),
+            "method": run.get("filtering_method", "generalized_gaussian_fisher"),
             "state_names": tuple(model.state_names),
         }
     }
@@ -129,8 +134,7 @@ def _sample_static_posterior(opt: OptimizationResult, model, n_samples: int, rng
     if not opt.diagnostics.laplace_valid or opt.covariance is None:
         raise ValueError("propagated latent uncertainty requires a valid Laplace posterior")
     free_draws = rng.multivariate_normal(opt.free_parameters, opt.covariance, size=n_samples)
-    prior_mean = model.priors.mean
-    draws = np.tile(prior_mean, (n_samples, 1))
+    draws = np.tile(model.parameter_layout.mean, (n_samples, 1))
     draws[:, opt.free_mask] = free_draws
     return draws
 
@@ -142,13 +146,13 @@ def _latent_propagated(opt, model, subject_data, config, rng):
             RuntimeWarning,
             stacklevel=3,
         )
-        return _latent_none(model.evaluate(opt.parameters, subject_data), model)
+        return _latent_none(model.evaluate(opt.parameters, subject_data, config=config), model)
     if opt.diagnostics.laplace_fragile:
         warnings.warn("Laplace posterior is numerically fragile; propagated latent uncertainty may be sensitive.", RuntimeWarning, stacklevel=3)
     draws = _sample_static_posterior(opt, model, config.latent_samples, rng)
     trajectories = []
     for p in draws:
-        run = model.evaluate(p, subject_data)
+        run = model.evaluate(p, subject_data, config=config)
         trajectories.append(np.asarray(run["states"], dtype=float))
     samples = np.stack(trajectories, axis=0)  # S x T x n_state
     mean = np.mean(samples, axis=0)
@@ -175,25 +179,19 @@ def _latent_propagated(opt, model, subject_data, config, rng):
 
 
 def individual_fit(data, model, *, config: Config | None = None) -> FitResult:
-    """Fit every subject under one :class:`~bayesgbm.StateModel`.
-
-    The scientific likelihood is determined by the model. If latent-state
-    uncertainty is present in the generative model, filtering is used during
-    every objective evaluation regardless of ``latent_uncertainty``. The latter
-    controls which latent uncertainty is retained for reporting/plotting.
-    """
+    """Fit every subject under one :class:`~bayesgbm.StateModel`."""
     if config is None:
         config = Config()
     validate_fit_spec(data, model, config)
     rng = np.random.default_rng(config.random_state)
-
     opts = []
     latent = []
     predictions = []
+
     for n, subject in enumerate(data):
         opt = optimize_map(subject, model, config, rng=rng)
         opts.append(opt)
-        run_map = model.evaluate(opt.parameters, subject)
+        run_map = model.evaluate(opt.parameters, subject, config=config)
         predictions.append(np.asarray(run_map["prediction"], dtype=float))
         if config.latent_uncertainty == "propagated":
             latent_n = _latent_propagated(opt, model, subject, config, rng)
@@ -208,22 +206,31 @@ def individual_fit(data, model, *, config: Config | None = None) -> FitResult:
             print(f"Subject {n + 1:02d}: log joint={opt.log_joint:.3f}, Laplace={status}{frag}")
 
     parameters = np.vstack([o.parameters for o in opts])
-    ntheta = model.n_theta
+    layout = model.parameter_layout
+    pq = parameters[:, layout.process_noise_slice]
+    pr = parameters[:, layout.observation_noise_slice]
+
     result = FitResult(
         input=FitInput(
             model_name=model.name,
             family=model.family,
-            parameter_names=tuple(model.priors.names),
+            parameter_names=tuple(layout.names),
             state_names=tuple(model.state_names),
-            theta_slice=model.priors.theta_slice,
-            phi_slice=model.priors.phi_slice,
-            prior_mean=model.priors.mean.copy(),
-            prior_covariance=model.priors.covariance.copy(),
+            theta_slice=layout.theta_slice,
+            phi_slice=layout.phi_slice,
+            process_noise_slice=layout.process_noise_slice,
+            observation_noise_slice=layout.observation_noise_slice,
+            prior_mean=layout.mean.copy(),
+            prior_covariance=layout.covariance.copy(),
         ),
         output=FitOutput(
             parameters=parameters,
-            evolution_parameters=parameters[:, :ntheta],
-            observation_parameters=parameters[:, ntheta:],
+            evolution_parameters=parameters[:, layout.theta_slice],
+            observation_parameters=parameters[:, layout.phi_slice],
+            process_noise_parameters=pq,
+            observation_noise_parameters=pr,
+            process_noise_sd=np.exp(pq),
+            observation_noise_sd=np.exp(pr),
             log_evidence=np.asarray([o.log_evidence for o in opts], dtype=float),
             latent=latent,
             prediction=predictions,
@@ -241,7 +248,6 @@ def individual_fit(data, model, *, config: Config | None = None) -> FitResult:
         model=model,
         data=copy.deepcopy(data),
     )
-
     if config.display:
         result.plot(subject=0, display=True)
     return result
